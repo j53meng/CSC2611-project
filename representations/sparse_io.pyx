@@ -12,7 +12,7 @@ def export_mat_from_dict(counts, filename):
     cdef char* fn
     fn = filename
     fout = fopen(fn, 'w')
-    for (i, c), v in counts.iteritems():
+    for (i, c), v in counts.items():
         word1 = i
         word2  = c
         val = v

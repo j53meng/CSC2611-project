@@ -5,8 +5,8 @@
 
 mkdir embeddings
 cd embeddings
-curl -o eng-all-sgns.zip http://snap.stanford.edu/historical_embeddings/eng-all_sgns.zip
-unzip eng-all-sgns.zip
+curl -o eng-all_sgns.zip http://snap.stanford.edu/historical_embeddings/eng-all_sgns.zip
+unzip eng-all_sgns.zip
 mv sgns eng-all_sgns
 cd ..
 python -m vecanalysis.ws_eval embeddings/eng-all_sgns/1990 vecanalysis/simtestsets/ws/bruni_men.txt --type SGNS

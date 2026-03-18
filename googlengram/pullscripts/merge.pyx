@@ -39,7 +39,7 @@ def main(proc_num, lock, out_dir, in_dir, years):
             chunk_counts = sparse_io.retrieve_mat_as_dict(chunk_name)
             chunk_index = ioutils.load_pickle(in_dir + str(chunk_num) + "/index.pkl") 
             chunk_index = list(chunk_index)
-            for pair, count in chunk_counts.iteritems():
+            for pair, count in chunk_counts.items():
                 i_word = chunk_index[pair[0]]
                 c_word = chunk_index[pair[1]]
                 new_pair = (indexing.word_to_cached_id(i_word, merged_index), 

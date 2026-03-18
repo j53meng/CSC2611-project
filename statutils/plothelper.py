@@ -43,9 +43,9 @@ def plot_word_dist(info, words, start_year, end_year, one_minus=False, legend_lo
     plot_info = {}
     for word in words:
         plot_info[word] = info[word]
-    for title, data_dict in plot_info.iteritems():
+    for title, data_dict in plot_info.items():
         x = []; y = []
-        for year, val in data_dict.iteritems():
+        for year, val in data_dict.items():
             if year >= start_year and year <= end_year:
                 x.append(year)
                 if one_minus:
@@ -75,9 +75,9 @@ def plot_word_basic(info, words, start_year, end_year, datatype):
     plot_info = {}
     for word in words:
         plot_info[word] = info[word]
-    for title, data_dict in plot_info.iteritems():
+    for title, data_dict in plot_info.items():
         x = []; y = []
-        for year, val in data_dict[datatype].iteritems():
+        for year, val in data_dict[datatype].items():
             if year >= start_year and year <= end_year:
                 x.append(year)
                 y.append(val)
@@ -88,9 +88,9 @@ def plot_word_basic(info, words, start_year, end_year, datatype):
     plt.show()
  
 def plot_basic(plot_info, start_year, end_year):
-    for title, data_dict in plot_info.iteritems():
+    for title, data_dict in plot_info.items():
         x = []; y = []
-        for year, val in data_dict.iteritems():
+        for year, val in data_dict.items():
             if year >= start_year and year <= end_year:
                 x.append(year)
                 y.append(val)

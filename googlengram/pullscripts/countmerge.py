@@ -22,7 +22,7 @@ def main(proc_num, queue, out_dir, in_dir):
         fixed_counts = {}
         old_mat = sparse_io.retrieve_mat_as_dict(in_dir + str(year) + ".bin")
         old_index = ioutils.load_pickle(in_dir + str(year) + "-list.pkl") 
-        for pair, count in old_mat.iteritems():
+        for pair, count in old_mat.items():
             try:
                 i_word = old_index[pair[0]]
             except IndexError:

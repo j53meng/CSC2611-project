@@ -14,24 +14,30 @@ class SequentialEmbedding:
             embeds[year] = Embedding.load(path + "/" + str(year), **kwargs)
         return SequentialEmbedding(embeds)
 
-    def get_embed(self, year):
-        return self.embeds[year]
+    def get_embed(self, year, word=None):
+        if word == None:
+            return self.embeds[year]
+        return self.embeds[year].represent(word)
 
     def get_subembeds(self, words, normalize=True):
         embeds = collections.OrderedDict()
-        for year, embed in self.embeds.iteritems():
+        for year, embed in self.embeds.items():
             embeds[year] = embed.get_subembed(words, normalize=normalize)
         return SequentialEmbedding(embeds)
 
     def get_time_sims(self, word1, word2):
        time_sims = collections.OrderedDict()
-       for year, embed in self.embeds.iteritems():
+       for year, embed in self.embeds.items():
            time_sims[year] = embed.similarity(word1, word2)
        return time_sims
 
-    def get_seq_neighbour_set(self, word, n=3):
+    def get_seq_neighbour_set(self, word, n=3, year=None):
         neighbour_set = set([])
-        for embed in self.embeds.itervalues():
+        if year != None:
+            embeds = [self.embeds[year]]
+        else:
+            embeds = self.embeds.values()
+        for embed in embeds:
             closest = embed.closest(word, n=n)
             for _, neighbour in closest:
                 neighbour_set.add(neighbour)
@@ -42,7 +48,7 @@ class SequentialEmbedding:
         for year in range(start_year, start_year + num_years):
             embed = self.embeds[year]
             year_closest = embed.closest(word, n=n*10)
-            for score, neigh in year_closest.iteritems():
+            for score, neigh in year_closest.items():
                 closest[neigh] += score
         return sorted(closest, key = lambda word : closest[word], reverse=True)[0:n]
 
@@ -53,9 +59,21 @@ class SequentialEmbedding:
                 word_set = word_set.union(set(random.sample(self.embeds.values()[-1].iw, num_rand)))
             word_list = list(word_set)
         year_subembeds = collections.OrderedDict()
-        for year,embed in self.embeds.iteritems():
+        for year,embed in self.embeds.items():
             year_subembeds[year] = embed.get_subembed(word_list)
         return SequentialEmbedding.from_ordered_dict(year_subembeds)
+
+    def get_common_vocab(self):
+        years = self.embeds.keys()
+        total = 0
+        common_vocab = set(self.embeds[min(years)].iw)
+        for year in years:
+            total += len(set(self.embeds[year].iw))
+            common_vocab &= set(self.embeds[year].iw)
+
+        common_vocab = list(common_vocab)
+        print(f"Total common words across all decades: {len(common_vocab)}")
+        return common_vocab
 
 
 class SequentialSVDEmbedding(SequentialEmbedding):

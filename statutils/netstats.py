@@ -71,7 +71,7 @@ def merge(out_pref, years, full_word_list):
             merged_word_stats[stat][word] = {}
     for year in years:
         year_stats = ioutils.load_pickle(out_pref + str(year) + "-tmp.pkl")
-        for stat, stat_vals in year_stats.iteritems():
+        for stat, stat_vals in year_stats.items():
             for word in full_word_list:
                 if not word in stat_vals:
                     merged_word_stats[stat][word][year] = NAN

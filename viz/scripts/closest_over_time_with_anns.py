@@ -37,6 +37,6 @@ if __name__ == "__main__":
             helpers.plot_annotations(annotations)
 
         helpers.savefig("%s_annotated" % word1)
-        for year, sim in time_sims.iteritems():
+        for year, sim in time_sims.items():
             print year, sim
 

@@ -43,7 +43,7 @@ def get_series_median_peryear(word_time_series, i_year_words, one_minus=False, s
     medians = []
     r_word_time_series = {}
     if exclude_partial_missing:
-        for word, time_series in word_time_series.iteritems():
+        for word, time_series in word_time_series.items():
             if not np.isnan(np.sum(time_series.values())):
                 r_word_time_series[word] = time_series
     else:
@@ -74,7 +74,7 @@ def get_series_mean_std_peryear(word_time_series, i_year_words, one_minus=False,
     stderrs = []
     r_word_time_series = {}
     if exclude_partial_missing:
-        for word, time_series in word_time_series.iteritems():
+        for word, time_series in word_time_series.items():
             if not np.isnan(np.sum(time_series.values())):
                 r_word_time_series[word] = time_series
     else:
@@ -105,8 +105,8 @@ def get_series_mean_stderr_peryear(word_time_series, i_year_words, one_minus=Fal
     stderrs = []
     r_word_time_series = {}
     if exclude_partial_missing:
-        for word, time_series in word_time_series.iteritems():
-            time_series = {year:val for year, val in time_series.iteritems() if year >= start_year and year <= end_year}
+        for word, time_series in word_time_series.items():
+            time_series = {year:val for year, val in time_series.items() if year >= start_year and year <= end_year}
             if not np.isnan(np.sum(time_series.values())):
                 r_word_time_series[word] = time_series
     else:

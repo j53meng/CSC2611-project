@@ -38,7 +38,7 @@ def get_time_sims(self, word1):
     lookups = {}
     nearests = {}
     sims = {}
-    for year, embed in self.embeds.iteritems():
+    for year, embed in self.embeds.items():
         nearest = []
         nearests["%s|%s" % (word1, year)]= nearest
         time_sims[year] = []

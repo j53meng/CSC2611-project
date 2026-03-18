@@ -1,11 +1,11 @@
 import os
 import collections
-import cPickle as pickle
+import pickle
 from googlengram.indexing import get_word_indices
 
 def words_above_count(count_dir, year, min_count):
     counts = load_pickle(count_dir + str(year) + "-counts.pkl")
-    words = sorted([word for word, count in counts.iteritems() if count >= min_count], key = lambda word : -1*counts[word])
+    words = sorted([word for word, count in counts.items() if count >= min_count], key = lambda word : -1*counts[word])
     return words
 
 def load_target_context_words(years, word_file, num_target, num_context):
@@ -51,7 +51,7 @@ def load_year_index_infos(index_dir, years, word_file, num_words=-1):
                 years, word_file, num_words=num_words)
     year_index_infos = collections.defaultdict(dict)
     word_lists = load_year_words(word_file, years)
-    for year, word_list in word_lists.iteritems():
+    for year, word_list in word_lists.items():
         year_index = load_pickle(index_dir + "/" + str(year) + "-index.pkl") 
         year_index_infos[year]["index"] = year_index
         if num_words != -1:
@@ -71,7 +71,7 @@ def load_year_index_infos_common(common_index, years, word_file, num_words=-1):
     """
     year_index_infos = collections.defaultdict(dict)
     word_lists = load_year_words(word_file, years)
-    for year, word_list in word_lists.iteritems():
+    for year, word_list in word_lists.items():
         year_index = common_index
         year_index_infos[year]["index"] = year_index
         if num_words != -1:

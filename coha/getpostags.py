@@ -31,7 +31,7 @@ def worker(proc_num, queue):
                     pos_tags[word][lemma_pos.split("_")[1]] += 1
         write_pickle(pos_tags, OUT + str(decade) + "-pos-counts.pkl")
         pos_maj = {}
-        for word, pos_counts in pos_tags.iteritems():
+        for word, pos_counts in pos_tags.items():
             pos_maj[word] = sorted(pos_counts, key = lambda t : -1*pos_counts[t])[0]
         write_pickle(pos_maj, OUT + str(decade) + "-pos-maj.pkl")
 

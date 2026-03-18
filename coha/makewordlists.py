@@ -14,7 +14,7 @@ def make_word_list(type):
     nproper_lists = {}
     nstop_nproper_lists = {}
     print "Processing type: ", type
-    for year, year_freqs in freqs.iteritems():
+    for year, year_freqs in freqs.items():
         proper_nouns = load_pickle(PROPER_NOUNS.format(year=year))
         word_lists[year] = [word for word in sorted(year_freqs, key = lambda val : -1*year_freqs[val]) if word != "" and word.isalnum()]
         nstop_lists[year] = [word for word in sorted(year_freqs, key = lambda val : -1*year_freqs[val]) if not process_word(word) in STOPWORDS and not word == "" and word.isalnum()]

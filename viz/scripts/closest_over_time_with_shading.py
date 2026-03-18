@@ -36,6 +36,6 @@ if __name__ == "__main__":
         annotations = helpers.plot_words(word1, words, fitted, cmap, sims)
 
         helpers.savefig("%s_shaded" % word1)
-        for year, sim in time_sims.iteritems():
+        for year, sim in time_sims.items():
             print year, sim
 

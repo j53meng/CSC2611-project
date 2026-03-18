@@ -79,7 +79,7 @@ def run_parallel(num_procs, out_pref, in_dir, years, target_lists, context_lists
         p.join()
     print "Merging"
     full_word_set = set([])
-    for year_words in target_lists.itervalues():
+    for year_words in target_lists.values():
         full_word_set = full_word_set.union(set(year_words))
     merge(out_pref, years, list(full_word_set))
 

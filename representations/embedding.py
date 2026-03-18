@@ -2,6 +2,7 @@ import heapq
 
 import numpy as np
 from sklearn import preprocessing
+import torch
 
 from ioutils import load_pickle
 #, lines
@@ -70,7 +71,7 @@ class Embedding:
         if w in self.wi:
             return self.m[self.wi[w], :]
         else:
-            print "OOV: ", w
+            print(f"OOV: {w}")
             return np.zeros(self.dim)
 
     def similarity(self, w1, w2):
@@ -84,8 +85,12 @@ class Embedding:
         """
         Assumes the vectors have been normalized.
         """
-        scores = self.m.dot(self.represent(w))
-        return heapq.nlargest(n, zip(scores, self.iw))
+        scores = self.m @ (self.represent(w)) # self.m.dot(self.represent(w))
+        # return heapq.nlargest(n, zip(scores, self.iw))
+        topk_vals, topk_idx = torch.topk(scores, n)
+
+        return [(topk_vals[i].item(), self.iw[topk_idx[i].item()])
+                for i in range(n)]
     
 
 class SVDEmbedding(Embedding):

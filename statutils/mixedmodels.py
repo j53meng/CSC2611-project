@@ -18,7 +18,7 @@ def make_data_frame(words, years, feature_dict):
     feature_dict["year"] = lambda word, year : year
     for word in words:
         for year in years:
-            for feature, feature_func in feature_dict.iteritems():
+            for feature, feature_func in feature_dict.items():
                 temp[feature].append(feature_func(word, year))
     df = pd.DataFrame(temp)
     df = df.replace([np.inf, -np.inf], np.nan)
