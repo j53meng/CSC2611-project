@@ -68,7 +68,7 @@ def compute_anisotropy_and_pc1(neighbor_embeddings):
 # 3. Enhanced Analysis Pipeline
 # ==========================================
 
-def run_anisotropy_alignment_analysis(embeddings, vocab, years, k=100, batch_size=256, results_path='result/anisotropy_alignment_results.pkl'):
+def run_anisotropy_alignment_analysis(embeddings, vocab, years, k=100, batch_size=256, results_path='anisotropy_alignment_results.pkl'):
     """
     Checks for existing pkl to avoid redundant GPU computation.
     Otherwise, computes anisotropy and alignment with temporal displacement.
@@ -144,6 +144,66 @@ def run_anisotropy_alignment_analysis(embeddings, vocab, years, k=100, batch_siz
 
     return final_output
 
+def analyze_by_period(pkl_path):
+    # Load the results
+    with open(pkl_path, 'rb') as f:
+        data = pickle.load(f)
+    
+    ani_series = data['anisotropy_series']
+    align_series = data['alignment_series']
+    vocab = data['common_vocab']
+    years = data['years']
+    
+    print("="*70)
+    print(f"{'Period':<15} | {'PCA Group':<12} | {'Avg Alignment':<15} | {'Sample Size'}")
+    print("="*70)
+
+    # Iterate through each transition (t -> t+1)
+    for i in range(len(years) - 1):
+        y_start = years[i]
+        y_end = years[i+1]
+        period_label = f"{y_start} -> {y_end}"
+        
+        current_ani_scores = []
+        current_align_vals = []
+        
+        for word in vocab:
+            # A(w) at year t
+            score_t = ani_series[word][i]
+            # Alignment for movement t -> t+1
+            alignment_t_next = align_series[word][i]
+            
+            if not np.isnan(score_t) and not np.isnan(alignment_t_next):
+                current_ani_scores.append(score_t)
+                current_align_vals.append(alignment_t_next)
+        
+        current_ani_scores = np.array(current_ani_scores)
+        current_align_vals = np.array(current_align_vals)
+        
+        if len(current_ani_scores) == 0:
+            continue
+            
+        # Define High/Low thresholds for THIS SPECIFIC DECADE
+        # We use Top 25% and Bottom 25% for maximum contrast
+        high_thresh = np.percentile(current_ani_scores, 95)
+        low_thresh = np.percentile(current_ani_scores, 5)
+        
+        high_group = current_align_vals[current_ani_scores >= high_thresh]
+        low_group = current_align_vals[current_ani_scores <= low_thresh]
+        
+        avg_high = np.mean(high_group)
+        avg_low = np.mean(low_group)
+        
+        # Print results for this decade
+        print(f"{period_label:<15} | {'High (Top 25%)':<12} | {avg_high:<15.4f} | {len(high_group)}")
+        print(f"{'':<15} | {'Low (Bot 25%)':<12} | {avg_low:<15.4f} | {len(low_group)}")
+        
+        # Calculate improvement
+        improvement = ((avg_high - avg_low) / avg_low) * 100
+        print(f"{'':<15} | -> Gap: {improvement:>+6.2f}%")
+        print("-" * 70)
+
+
 # ==========================================
 # 4. Main Execution
 # ==========================================
@@ -152,7 +212,7 @@ if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(device)
     target_years = range(1850, 2000, 10) 
-    results_file = 'result/anisotropy_alignment_results.pkl'
+    results_file = 'anisotropy_alignment_results.pkl'
     
     print("Loading sequential embedding models...")
     embeddings = SequentialEmbedding.load("embeddings/eng-all_sgns", target_years)
@@ -164,11 +224,11 @@ if __name__ == "__main__":
         embeddings.embeds[year].m = torch.nan_to_num(embeddings.embeds[year].m, nan=0.0)
 
     # Handle vocab extraction or loading
-    try:
-        with open('result/anisotropy_alignment_results.pkl', 'rb') as f:
-            common_vocab = pickle.load(f)['common_vocab']
-    except:
-        common_vocab = get_stable_target_words(embeddings)
+    # try:
+    #     with open('result/anisotropy_alignment_results.pkl', 'rb') as f:
+    #         common_vocab = pickle.load(f)['common_vocab']
+    # except:
+    common_vocab = get_stable_target_words(embeddings)
 
     # Run Analysis (Skips computation if pkl exists)
     final_results = run_anisotropy_alignment_analysis(
@@ -186,3 +246,7 @@ if __name__ == "__main__":
         print(f"  {period} : {avg:.4f}")
     print("="*50)
     print(f"Full results stored in: {results_file}")
+
+    print()
+
+    analyze_by_period('anisotropy_alignment_results.pkl')
