@@ -68,7 +68,7 @@ def compute_anisotropy_and_pc1(neighbor_embeddings):
 # 3. Enhanced Analysis Pipeline
 # ==========================================
 
-def run_anisotropy_alignment_analysis(embeddings, vocab, years, k=100, batch_size=256, results_path='anisotropy_alignment_results.pkl'):
+def run_anisotropy_alignment_analysis(embeddings, vocab, years, k=100, batch_size=256, results_path='result/anisotropy_alignment_results_1950.pkl'):
     """
     Checks for existing pkl to avoid redundant GPU computation.
     Otherwise, computes anisotropy and alignment with temporal displacement.
@@ -144,6 +144,54 @@ def run_anisotropy_alignment_analysis(embeddings, vocab, years, k=100, batch_siz
 
     return final_output
 
+def print_top_bottom_anisotropy(pkl_path, n=10):
+    """
+    Identifies and prints the words with the highest and lowest 
+    Anisotropy scores for each timestamp.
+    """
+    # Load the results
+    with open(pkl_path, 'rb') as f:
+        data = pickle.load(f)
+    
+    ani_series = data['anisotropy_series']
+    vocab = data['common_vocab']
+    years = data['years']
+
+    print("\n" + "="*70)
+    print(f"TOP AND BOTTOM {n} WORDS BY ANISOTROPY SCORE")
+    print("="*70)
+
+    for i, year in enumerate(years):
+        # Create list of (word, score) for the current year
+        year_scores = []
+        for word in vocab:
+            score = ani_series[word][i]
+            if not np.isnan(score):
+                year_scores.append((word, score))
+        
+        # Sort by score: descending for top, ascending for bottom
+        year_scores.sort(key=lambda x: x[1], reverse=True)
+        
+        top_n = year_scores[:n]
+        bottom_n = year_scores[-n:][::-1] # Reverse to show lowest at the very bottom
+
+        print(f"\n>>> Year: {year} <<<")
+        
+        # Print Top N
+        print(f"  Highest Anisotropy (Narrowest Semantic Space):")
+        for idx, (word, score) in enumerate(top_n, 1):
+            print(f"    {idx:>2}. {word:<15} ({score:.4f})")
+        
+        print(f"  ---")
+        
+        # Print Bottom N
+        print(f"  Lowest Anisotropy (Broadest Semantic Space):")
+        for idx, (word, score) in enumerate(bottom_n, 1):
+            # idx is recalculated to show rank within bottom
+            print(f"    {n-idx+1:>2}. {word:<15} ({score:.4f})")
+        
+        print("-" * 40)
+
 def analyze_by_period(pkl_path):
     # Load the results
     with open(pkl_path, 'rb') as f:
@@ -184,9 +232,9 @@ def analyze_by_period(pkl_path):
             continue
             
         # Define High/Low thresholds for THIS SPECIFIC DECADE
-        # We use Top 25% and Bottom 25% for maximum contrast
-        high_thresh = np.percentile(current_ani_scores, 95)
-        low_thresh = np.percentile(current_ani_scores, 5)
+        # We use Top 10% and Bottom 10% for maximum contrast
+        high_thresh = np.percentile(current_ani_scores, 90)
+        low_thresh = np.percentile(current_ani_scores, 10)
         
         high_group = current_align_vals[current_ani_scores >= high_thresh]
         low_group = current_align_vals[current_ani_scores <= low_thresh]
@@ -195,8 +243,8 @@ def analyze_by_period(pkl_path):
         avg_low = np.mean(low_group)
         
         # Print results for this decade
-        print(f"{period_label:<15} | {'High (Top 25%)':<12} | {avg_high:<15.4f} | {len(high_group)}")
-        print(f"{'':<15} | {'Low (Bot 25%)':<12} | {avg_low:<15.4f} | {len(low_group)}")
+        print(f"{period_label:<15} | {'High (Top 10%)':<12} | {avg_high:<15.4f} | {len(high_group)}")
+        print(f"{'':<15} | {'Low (Bot 10%)':<12} | {avg_low:<15.4f} | {len(low_group)}")
         
         # Calculate improvement
         improvement = ((avg_high - avg_low) / avg_low) * 100
@@ -212,7 +260,7 @@ if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(device)
     target_years = range(1850, 2000, 10) 
-    results_file = 'anisotropy_alignment_results.pkl'
+    results_file = 'result/anisotropy_alignment_results_1950.pkl'
     
     print("Loading sequential embedding models...")
     embeddings = SequentialEmbedding.load("embeddings/eng-all_sgns", target_years)
@@ -225,7 +273,7 @@ if __name__ == "__main__":
 
     # Handle vocab extraction or loading
     # try:
-    #     with open('result/anisotropy_alignment_results.pkl', 'rb') as f:
+    #     with open('result/anisotropy_alignment_results_1950.pkl', 'rb') as f:
     #         common_vocab = pickle.load(f)['common_vocab']
     # except:
     common_vocab = get_stable_target_words(embeddings)
@@ -249,4 +297,8 @@ if __name__ == "__main__":
 
     print()
 
-    analyze_by_period('anisotropy_alignment_results.pkl')
+    analyze_by_period('result/anisotropy_alignment_results_1950.pkl')
+
+    print()
+
+    print_top_bottom_anisotropy('result/anisotropy_alignment_results_1950.pkl', n=10)
