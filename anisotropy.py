@@ -6,6 +6,11 @@ import os
 from collections import defaultdict
 from tqdm import tqdm
 from representations.sequentialembedding import SequentialEmbedding
+from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+from matplotlib.patches import FancyArrowPatch
+from scipy.stats import spearmanr, pearsonr
 
 # ==========================================
 # 1. Utility Functions
@@ -130,9 +135,42 @@ def run_anisotropy_alignment_analysis(embeddings, vocab, years, k=100, batch_siz
             period_stats[f"{y_t}->{y_next}"] = avg_align
             print(f"Average Alignment Score ({y_t}->{y_next}): {avg_align:.4f}")
 
+    ani_series = defaultdict(list)
+    alignment_series = defaultdict(list)
+    drift_magnitude_series = defaultdict(list)
+    period_stats = {}
+
+    for i in range(len(years)):
+        y_t = years[i]
+        y_next = years[i+1] if i < len(years) - 1 else None
+        
+        for start in tqdm(range(0, len(vocab), batch_size)):
+            batch_words = vocab[start : start + batch_size]
+
+            neighbor_matrix = get_neighbor_matrix(embeddings, batch_words, y_t, k=k, device=device)
+            scores, pc1_vectors = compute_anisotropy_and_pc1(neighbor_matrix)
+            
+            for w, s in zip(batch_words, scores.cpu().numpy()):
+                ani_series[w].append(float(s))
+
+            if y_next is not None:
+                v_t = torch.stack([embeddings.get_embed(y_t, w) for w in batch_words]).to(device)
+                v_next = torch.stack([embeddings.get_embed(y_next, w) for w in batch_words]).to(device)
+
+                cos_sim_raw = F.cosine_similarity(v_t, v_next, dim=1)
+                cos_dist = 1 - cos_sim_raw
+                
+                delta_v = v_next - v_t
+                alignment = torch.abs(F.cosine_similarity(delta_v, pc1_vectors, dim=1))
+                
+                for j, word in enumerate(batch_words):
+                    alignment_series[word].append(float(alignment[j].cpu().item()))
+                    drift_magnitude_series[word].append(float(cos_dist[j].cpu().item()))
+
     final_output = {
         'anisotropy_series': dict(ani_series),
         'alignment_series': dict(alignment_series),
+        'drift_magnitude_series': dict(drift_magnitude_series), # 存入 pkl
         'period_averages': period_stats,
         'common_vocab': vocab,
         'years': list(years)
@@ -193,64 +231,419 @@ def print_top_bottom_anisotropy(pkl_path, n=10):
         print("-" * 40)
 
 def analyze_by_period(pkl_path):
-    # Load the results
+    """
+    Performs two categorical analyses:
+    1. Group by Anisotropy -> Measure Alignment
+    2. Group by Alignment  -> Measure Drift Magnitude
+    """
     with open(pkl_path, 'rb') as f:
         data = pickle.load(f)
     
     ani_series = data['anisotropy_series']
     align_series = data['alignment_series']
+    drift_series = data.get('drift_magnitude_series', {})
     vocab = data['common_vocab']
     years = data['years']
     
-    print("="*70)
-    print(f"{'Period':<15} | {'PCA Group':<12} | {'Avg Alignment':<15} | {'Sample Size'}")
-    print("="*70)
+    # Define a shared separator for the table
+    line_width = 85
+    print("=" * line_width)
+    print(f"{'Period':<15} | {'Metric Group':<20} | {'Avg Value':<15} | {'Sample Size'}")
+    print("=" * line_width)
 
-    # Iterate through each transition (t -> t+1)
     for i in range(len(years) - 1):
-        y_start = years[i]
-        y_end = years[i+1]
-        period_label = f"{y_start} -> {y_end}"
+        period_label = f"{years[i]} -> {years[i+1]}"
         
-        current_ani_scores = []
-        current_align_vals = []
+        # Collect current lists for all words at index i
+        scores_t = []   # Anisotropy
+        aligns_t = []   # Alignment
+        drifts_t = []   # Drift Magnitude
         
         for word in vocab:
-            # A(w) at year t
-            score_t = ani_series[word][i]
-            # Alignment for movement t -> t+1
-            alignment_t_next = align_series[word][i]
-            
-            if not np.isnan(score_t) and not np.isnan(alignment_t_next):
-                current_ani_scores.append(score_t)
-                current_align_vals.append(alignment_t_next)
+            # Check indices to avoid errors
+            if i < len(ani_series[word]) and i < len(align_series[word]):
+                scores_t.append(ani_series[word][i])
+                aligns_t.append(align_series[word][i])
+                drifts_t.append(drift_series[word][i])
         
-        current_ani_scores = np.array(current_ani_scores)
-        current_align_vals = np.array(current_align_vals)
-        
-        if len(current_ani_scores) == 0:
-            continue
-            
-        # Define High/Low thresholds for THIS SPECIFIC DECADE
-        # We use Top 10% and Bottom 10% for maximum contrast
-        high_thresh = np.percentile(current_ani_scores, 90)
-        low_thresh = np.percentile(current_ani_scores, 10)
-        
-        high_group = current_align_vals[current_ani_scores >= high_thresh]
-        low_group = current_align_vals[current_ani_scores <= low_thresh]
-        
-        avg_high = np.mean(high_group)
-        avg_low = np.mean(low_group)
-        
-        # Print results for this decade
-        print(f"{period_label:<15} | {'High (Top 10%)':<12} | {avg_high:<15.4f} | {len(high_group)}")
-        print(f"{'':<15} | {'Low (Bot 10%)':<12} | {avg_low:<15.4f} | {len(low_group)}")
-        
-        # Calculate improvement
-        improvement = ((avg_high - avg_low) / avg_low) * 100
-        print(f"{'':<15} | -> Gap: {improvement:>+6.2f}%")
-        print("-" * 70)
+        scores_t = np.array(scores_t)
+        aligns_t = np.array(aligns_t)
+        drifts_t = np.array(drifts_t)
 
+        # --- ANALYSIS 1: Group by Anisotropy, measure Alignment ---
+        ani_high_thresh = np.percentile(scores_t, 90)
+        ani_low_thresh = np.percentile(scores_t, 10)
+        
+        mask_h_ani = scores_t >= ani_high_thresh
+        mask_l_ani = scores_t <= ani_low_thresh
+        
+        avg_align_h_ani = np.mean(aligns_t[mask_h_ani])
+        avg_align_l_ani = np.mean(aligns_t[mask_l_ani])
+        ani_gap = ((avg_align_h_ani - avg_align_l_ani) / avg_align_l_ani) * 100
+
+        # --- ANALYSIS 2: Group by Alignment, measure Drift Magnitude ---
+        align_high_thresh = np.percentile(aligns_t, 90)
+        align_low_thresh = np.percentile(aligns_t, 10)
+        
+        mask_h_align = aligns_t >= align_high_thresh
+        mask_l_align = aligns_t <= align_low_thresh
+        
+        avg_drift_h_align = np.mean(drifts_t[mask_h_align])
+        avg_drift_l_align = np.mean(drifts_t[mask_l_align])
+        align_gap = ((avg_drift_h_align - avg_drift_l_align) / avg_drift_l_align) * 100
+
+        # --- PRINTING RESULTS ---
+        # Part 1: Anisotropy -> Alignment
+        print(f"{period_label:<15} | {'High Ani (Top 10%)':<20} | {avg_align_h_ani:<15.4f} | {sum(mask_h_ani)}")
+        print(f"{'':<15} | {'Low Ani (Bot 10%)':<20} | {avg_align_l_ani:<15.4f} | {sum(mask_l_ani)}")
+        print(f"{'':<15} | -> Align Gap: {ani_gap:>+6.2f}%")
+        
+        print(f"{'':<15} | {'-'*45}") # Sub-separator
+
+        # Part 2: Alignment -> Drift Magnitude
+        print(f"{'':<15} | {'High Align (10%)':<20} | {avg_drift_h_align:<15.4f} | {sum(mask_h_align)}")
+        print(f"{'':<15} | {'Low Align (10%)':<20} | {avg_drift_l_align:<15.4f} | {sum(mask_l_align)}")
+        print(f"{'':<15} | -> Drift Gap: {align_gap:>+6.2f}%")
+        
+        print("-" * line_width)
+
+
+def visualize_word_detailed_shift_arrow(pkl_path, embeddings, target_word="to", k=100):
+    if not os.path.exists(pkl_path):
+        print(f"Error: {pkl_path} not found.")
+        return
+
+    with open(pkl_path, 'rb') as f:
+        data = pickle.load(f)
+
+    years = data['years']
+    ani_series = data['anisotropy_series']
+
+    if target_word not in ani_series:
+        print(f"Error: Word '{target_word}' not found in analyzed vocabulary.")
+        return
+
+    print(f"Generating sequence for '{target_word}'...")
+
+    for i, year in enumerate(years):
+        current_score = ani_series[target_word][i]
+        next_year = years[i + 1] if i < len(years) - 1 else None
+
+        # --- Extract vectors ---
+        v_t = embeddings.get_embed(year, target_word)
+        if torch.is_tensor(v_t): v_t = v_t.detach().cpu().numpy()
+
+        neighbors = embeddings.get_seq_neighbour_set(target_word, n=k, year=year)
+        neighbor_vecs, neighbor_labels = [], []
+        for nw in neighbors:
+            v_nw = embeddings.get_embed(year, nw)
+            if torch.is_tensor(v_nw): v_nw = v_nw.detach().cpu().numpy()
+            neighbor_vecs.append(v_nw)
+            neighbor_labels.append(nw)
+
+        neighbor_vecs = np.array(neighbor_vecs)
+        all_vectors = np.vstack([v_t.reshape(1, -1), neighbor_vecs])
+
+        # --- PCA ---
+        pca = PCA(n_components=2)
+        coords = pca.fit_transform(all_vectors)
+
+        target_coord = coords[0]
+        neighbor_coords = coords[1:]
+
+        # --- Compact the neighbor cloud ---
+        cloud_center = neighbor_coords.mean(axis=0)
+        COMPACT_SCALE = 0.6
+        neighbor_coords_compact = cloud_center + (neighbor_coords - cloud_center) * COMPACT_SCALE
+
+        # --- Semantic drift vector ---
+        drift_v_projected = np.zeros(2)
+        if next_year is not None:
+            v_next = embeddings.get_embed(next_year, target_word)
+            if torch.is_tensor(v_next): v_next = v_next.detach().cpu().numpy()
+            drift_v = v_next - v_t
+            drift_v_projected = np.dot(pca.components_, drift_v)
+   
+        fig = plt.figure(figsize=(12, 13))
+
+        ax_header = fig.add_axes([0.0, 0.88, 1.0, 0.12])
+        ax_header.axis('off')
+
+        ax = fig.add_axes([0.05, 0.05, 0.90, 0.82])
+        ax.set_aspect('equal')
+        ax.axis('off')
+
+        ax_header.text(
+            0.5, 0.78,
+            f"Figure {i + 1}.  Semantic neighbourhood of '{target_word}'  ({year})",
+            fontsize=14, fontweight='bold', color='#1a1a2e',
+            ha='center', va='top', transform=ax_header.transAxes
+        )
+        ax_header.text(
+            0.5, 0.38,
+            f"Anisotropy  A(w) = {current_score:.4f}",
+            fontsize=10, color='#555555',
+            ha='center', va='top', transform=ax_header.transAxes,
+            style='italic'
+        )
+
+        legend_x = 0.02
+        legend_y = 0.08
+
+        ax_header.annotate(
+            '', xy=(legend_x + 0.055, legend_y), xytext=(legend_x, legend_y),
+            xycoords='axes fraction', textcoords='axes fraction',
+            arrowprops=dict(arrowstyle='<->', color='#4472C4', lw=1.8, mutation_scale=10)
+        )
+        ax_header.text(
+            legend_x + 0.065, legend_y,
+            "PC1 axis (bidirectional, sign-invariant)",
+            fontsize=8.5, color='#4472C4',
+            va='center', transform=ax_header.transAxes
+        )
+
+        if next_year is not None:
+            drift_legend_x = legend_x + 0.40
+            ax_header.annotate(
+                '', xy=(drift_legend_x + 0.055, legend_y), xytext=(drift_legend_x, legend_y),
+                xycoords='axes fraction', textcoords='axes fraction',
+                arrowprops=dict(arrowstyle='-|>', color='#2ca02c', lw=1.8, mutation_scale=10)
+            )
+            ax_header.text(
+                drift_legend_x + 0.065, legend_y,
+                f"Semantic drift → {next_year}",
+                fontsize=8.5, color='#2ca02c',
+                va='center', transform=ax_header.transAxes
+            )
+
+        ax_header.axhline(y=0.0, color='#cccccc', linewidth=0.8, xmin=0.02, xmax=0.98)
+
+        for j, label in enumerate(neighbor_labels):
+            ax.text(
+                neighbor_coords_compact[j, 0],
+                neighbor_coords_compact[j, 1],
+                f" {label}",
+                fontsize=7.5, alpha=0.65,
+                color='#2c4a7c',
+                zorder=2
+            )
+
+        ax.scatter(
+            target_coord[0], target_coord[1],
+            c='#d62728', edgecolors='#8b0000',
+            s=220, zorder=5, linewidths=1.2
+        )
+        ax.text(
+            target_coord[0], target_coord[1],
+            f"  {target_word.upper()}",
+            fontsize=18, fontweight='bold', color='#d62728',
+            zorder=6,
+            bbox=dict(facecolor='white', alpha=0.75, edgecolor='none', pad=2),
+            va='bottom'
+        )
+
+        x_vals = neighbor_coords_compact[:, 0]
+        axis_reach = np.percentile(np.abs(x_vals), 90) * 1.3
+
+        pc1_arrow = FancyArrowPatch(
+            (-axis_reach, 0), (axis_reach, 0),
+            arrowstyle='<->',
+            color='#4472C4',
+            linewidth=2.0,
+            mutation_scale=14,
+            zorder=1,
+            alpha=0.75
+        )
+        ax.add_patch(pc1_arrow)
+
+        ax.text(
+            axis_reach + 0.01, 0,
+            "PC1+", fontsize=8, color='#4472C4', alpha=0.8,
+            ha='left', va='center'
+        )
+        ax.text(
+            -axis_reach - 0.01, 0,
+            "PC1−", fontsize=8, color='#4472C4', alpha=0.8,
+            ha='right', va='center'
+        )
+        ax.text(
+            0, -np.percentile(np.abs(neighbor_coords_compact[:, 1]), 95) * 0.15,
+            "(sign-invariant axis)",
+            fontsize=7.5, color='#4472C4', alpha=0.55,
+            ha='center', va='top', style='italic'
+        )
+
+        if next_year is not None and np.linalg.norm(drift_v_projected) > 1e-6:
+            drift_arrow = FancyArrowPatch(
+                (target_coord[0], target_coord[1]),
+                (target_coord[0] + drift_v_projected[0],
+                 target_coord[1] + drift_v_projected[1]),
+                arrowstyle='-|>',
+                color='#2ca02c',
+                linewidth=2.2,
+                mutation_scale=16,
+                zorder=10,
+                alpha=0.9
+            )
+            ax.add_patch(drift_arrow)
+            ax.text(
+                target_coord[0] + drift_v_projected[0],
+                target_coord[1] + drift_v_projected[1],
+                f"  → {next_year}",
+                fontsize=9, color='#2ca02c',
+                fontweight='bold', alpha=0.9, zorder=11,
+                ha='left', va='center'
+            )
+
+        all_x = np.concatenate([neighbor_coords_compact[:, 0], [target_coord[0]]])
+        all_y = np.concatenate([neighbor_coords_compact[:, 1], [target_coord[1]]])
+        margin_x = (all_x.max() - all_x.min()) * 0.15 + 0.02
+        margin_y = (all_y.max() - all_y.min()) * 0.15 + 0.02
+        ax.set_xlim(all_x.min() - margin_x, all_x.max() + margin_x)
+        ax.set_ylim(all_y.min() - margin_y, all_y.max() + margin_y)
+
+        save_name = f"Figure {i + 1}.png"
+        plt.savefig(save_name, dpi=300, bbox_inches='tight', pad_inches=0.1)
+        plt.close()
+        print(f"Saved {save_name}  [{year}]")
+
+    print(f"\nDone. Generated Figure 1 to Figure {len(years)}.")
+
+def calculate_alignment_drift_correlation(pkl_path):
+    """
+    Calculates the statistical correlation between Alignment and Drift Magnitude
+    for every word across all periods.
+    """
+    with open(pkl_path, 'rb') as f:
+        data = pickle.load(f)
+    
+    align_series = data['alignment_series']
+    drift_series = data.get('drift_magnitude_series', {})
+    vocab = data['common_vocab']
+    years = data['years']
+    
+    print("="*85)
+    print(f"{'Period':<15} | {'Spearman Rho':<15} | {'P-Value':<15} | {'Interpretation'}")
+    print("="*85)
+
+    for i in range(len(years) - 1):
+        period_label = f"{years[i]} -> {years[i+1]}"
+        
+        all_aligns = []
+        all_drifts = []
+        
+        for word in vocab:
+            # Ensure data exists for this word at this specific decade index
+            if i < len(align_series[word]) and i < len(drift_series[word]):
+                a_val = align_series[word][i]
+                d_val = drift_series[word][i]
+                
+                # Filter out NaNs or extremely small noise
+                if not np.isnan(a_val) and not np.isnan(d_val):
+                    all_aligns.append(a_val)
+                    all_drifts.append(d_val)
+        
+        if len(all_aligns) < 2:
+            continue
+
+        # Calculate Spearman Correlation
+        rho, p_val = spearmanr(all_aligns, all_drifts)
+        
+        # Determine significance
+        significance = "Significant" if p_val < 0.05 else "Not Sig."
+        strength = "Positive" if rho > 0 else "Negative"
+        
+        print(f"{period_label:<15} | {rho:<15.4f} | {p_val:<15.2e} | {strength} ({significance})")
+
+    print("="*85)
+
+
+    generate_alignment_drift_scatter_plots(pkl_path)
+
+
+
+def generate_alignment_drift_scatter_plots(pkl_path):
+    """
+    Generates scatter plots ONLY for words in the top 50th percentile of Anisotropy A(w).
+    Saves as plot_top50_1.png, plot_top50_2.png, etc.
+    """
+    if not os.path.exists(pkl_path):
+        print(f"Error: {pkl_path} not found.")
+        return
+
+    with open(pkl_path, 'rb') as f:
+        data = pickle.load(f)
+    
+    ani_series = data['anisotropy_series']
+    align_series = data['alignment_series']
+    drift_series = data.get('drift_magnitude_series', {})
+    vocab = data['common_vocab']
+    years = data['years']
+
+    print(f"Filtering for Top 50% Anisotropy and generating plots...")
+
+    for i in range(len(years) - 1):
+        period_label = f"{years[i]} -> {years[i+1]}"
+        
+        # 1. Collect all A(w) scores for this year to find the median
+        year_ani_scores = []
+        for word in vocab:
+            if i < len(ani_series[word]):
+                val = ani_series[word][i]
+                if not np.isnan(val):
+                    year_ani_scores.append(val)
+        
+        if not year_ani_scores: continue
+        
+        # Calculate 50th percentile (Median) threshold
+        threshold = np.percentile(year_ani_scores, 95)
+        
+        # 2. Filter words based on threshold
+        filtered_aligns = []
+        filtered_drifts = []
+        
+        for word in vocab:
+            if (i < len(ani_series[word]) and i < len(align_series[word]) and 
+                i < len(drift_series[word])):
+                
+                a_score = ani_series[word][i]
+                al_val = align_series[word][i]
+                dr_val = drift_series[word][i]
+                
+                # Check if word is in the top 50% of Anisotropy
+                if not np.isnan(a_score) and a_score >= threshold:
+                    if not np.isnan(al_val) and not np.isnan(dr_val):
+                        filtered_aligns.append(al_val)
+                        filtered_drifts.append(dr_val)
+        
+        if len(filtered_aligns) < 10: continue
+
+        filtered_aligns = np.array(filtered_aligns)
+        filtered_drifts = np.array(filtered_drifts)
+
+        # 3. Calculate Correlation for the filtered set
+        rho, p_val = spearmanr(filtered_aligns, filtered_drifts)
+
+        # 4. Plotting
+        plt.figure(figsize=(10, 7))
+        # Use a different color (Dark Orange) to indicate filtered data
+        plt.scatter(filtered_aligns, filtered_drifts, alpha=0.4, color='darkorange', s=12, label='Words (Top 50% A(w))')
+        
+        # Add Trend Line
+        m, b = np.polyfit(filtered_aligns, filtered_drifts, 1)
+        plt.plot(filtered_aligns, m*filtered_aligns + b, color='black', linewidth=2, label='Trend Line')
+
+        plt.title(f"Period: {period_label} (Filtered: Top 50% Anisotropy)\nSpearman Rho: {rho:.4f} (p: {p_val:.2e})", fontsize=13)
+        plt.xlabel("Alignment with PC1 ($|cos|$)", fontsize=11)
+        plt.ylabel("Drift Magnitude (Cosine Distance)", fontsize=11)
+        plt.grid(True, linestyle='--', alpha=0.3)
+        plt.legend()
+
+        save_name = f"plot_top50_{i+1}.png"
+        plt.savefig(save_name, dpi=200, bbox_inches='tight')
+        plt.close()
+        
+        print(f"Saved {save_name} for {period_label} (Words included: {len(filtered_aligns)})")
 
 # ==========================================
 # 4. Main Execution
@@ -259,8 +652,8 @@ def analyze_by_period(pkl_path):
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(device)
-    target_years = range(1850, 2000, 10) 
-    results_file = 'result/anisotropy_alignment_results_1950.pkl'
+    target_years = range(1950, 2000, 10) 
+    results_file = 'result/anisotropy_alignment_results_1950_2.pkl'
     
     print("Loading sequential embedding models...")
     embeddings = SequentialEmbedding.load("embeddings/eng-all_sgns", target_years)
@@ -297,8 +690,17 @@ if __name__ == "__main__":
 
     print()
 
-    analyze_by_period('result/anisotropy_alignment_results_1950.pkl')
-
+    analyze_by_period(results_file)
     print()
 
-    print_top_bottom_anisotropy('result/anisotropy_alignment_results_1950.pkl', n=10)
+    # print_top_bottom_anisotropy(results_file, n=10)
+    # print()
+
+    calculate_alignment_drift_correlation(results_file)
+
+    # visualize_word_detailed_shift_arrow(
+    #     pkl_path=results_file, 
+    #     embeddings=embeddings, 
+    #     target_word="broadcast", 
+    #     k=100
+    # )
