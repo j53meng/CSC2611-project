@@ -9,7 +9,7 @@ from scipy.stats import percentileofscore
 import matplotlib.pyplot as plt
 
 # --------------id bursts----------------
-def find_significant_bursts(id_series, years, sigma_percentile=70):
+def find_significant_bursts(id_series, years, sigma_percentile=70, restlessness_percentile=25):
     """
     Only finds bursts for words that are in the top % of restlessness.
     """
@@ -40,7 +40,7 @@ def find_significant_bursts(id_series, years, sigma_percentile=70):
 
     sorted_words = sorted(restlessness_scores.items(), key=lambda x: x[1])
     n = len(sorted_words)
-    q = n // 4 # 25% index
+    q = n * restlessness_percentile // 100 # 25% index
 
     bottom_25_words, bottom_score = [w for w, score in sorted_words[:q]], [score for w, score in sorted_words[:q]]
     top_25_words, top_score = [w for w, score in sorted_words[-q:]], [score for w, score in sorted_words[-q:]]
@@ -133,14 +133,33 @@ def plot_id_vs_velocity(word, id_series, vel_series, years):
     fig.tight_layout()
     plt.savefig(f"./figures/{word}_comparison.png")
 
-def plot_id_vs_freq(id, freq, years):
+def plot_id_vs_freq(id, freq, years, tiers=None):
     plt.figure(figsize=(12, 6))
 
-    # ID
-    plt.plot(years, id, marker='o', color='royalblue', linewidth=2.5, label=r'Geometric Force ($ID_{PR}$ vs. $V_{t+1}$)')
+    if not tiers:
+        # ID
+        plt.plot(years, id, marker='o', color='royalblue', linewidth=2.5, label=r'Geometric Force ($ID_{PR}$ vs. $V_{t+1}$)')
 
-    # Frequency
-    plt.plot(years, freq, marker='s', color='tab:red', linestyle='--', linewidth=2, alpha=0.8, label=r'Frequency Baseline ($Freq$ vs. $V_{t+1}$)')
+        # Frequency
+        plt.plot(years, freq, marker='s', color='tab:red', linestyle='--', linewidth=2, alpha=0.8, label=r'Frequency Baseline ($Freq$ vs. $V_{t+1}$)')
+    else:
+        for label, data in tiers.items():
+            # Plot Geometric Force (ID)
+            plt.plot(years, data['id'], 
+                    marker='o', 
+                    color='royalblue', 
+                    linewidth=data['width'], 
+                    alpha=data['alpha'],
+                    label=f'Geometric Force ({label})')
+
+            # Plot Frequency Baseline
+            plt.plot(years, data['freq'], 
+                    marker='s', 
+                    color='tab:red', 
+                    linestyle='--', 
+                    linewidth=data['width'], 
+                    alpha=data['alpha'],
+                    label=f'Frequency Baseline ({label})')
 
     plt.axhline(0, color='black', linewidth=1, linestyle='-', alpha=0.5)
     plt.title("Lexical Dynamics: The 1900 Phase Transition", fontsize=16, fontweight='bold')
@@ -197,9 +216,8 @@ if __name__ == "__main__":
     freq_series = get_freqs_series(velocity_series)
 
     # Execute the analysis
-
     # get words with bursts
-    bursts, top25, bottom25 = find_significant_bursts(id_series, years)
+    bursts, top, bottom = find_significant_bursts(id_series, years) # set restlessness_percetnile to 50, 75, 100 for sensitivity analysis
     print(len(bursts))
     top_bursts = sorted(bursts, key=lambda x: x['z_score'], reverse=True)
 
@@ -224,23 +242,22 @@ if __name__ == "__main__":
         
         print(f"{b['word']:<15} | {b['year']:<6} | {b['z_score']:>7.2f} | {b['id_val']:>8.2f} | {rank:>8.2f}| {freq_rank:>8.2f}")
 
-    # plot_id_vs_velocity('monday', id_series, velocity_series, years)
+    plot_id_vs_velocity('monday', id_series, velocity_series, years)
     
     # correlation analysis for all words
-    # restless_words =list(bursts.keys())
-    # restless_id = {w: id_series[w] for w in restless_words}
-    # restless_vel = {w: velocity_series[w] for w in restless_words}
-    # r, p = calculate_predictability_index(restless_id, restless_vel, years)
-    # print(f"Predictability Index (r): {r:.4f}")
-    # print(f"P-value: {p:.4e}")
+    restless_words =list(bursts.keys())
+    restless_id = {w: id_series[w] for w in restless_words}
+    restless_vel = {w: velocity_series[w] for w in restless_words}
+    r, p = calculate_predictability_index(restless_id, restless_vel, years)
+    print(f"Predictability Index (r): {r:.4f}")
+    print(f"P-value: {p:.4e}")
 
-
-    # correlation analysis for top 25% vs bottom 25% restless words for each decade
+    # correlation analysis for top vs bottom restless words for each decade
     print(" id correlation with velocity:")
-    id_corr = calculate_predictability_index(id_series, velocity_series, years, top25, bottom25)
+    id_corr = calculate_predictability_index(id_series, velocity_series, years, top, bottom)
 
     print(" frequency correlation with velocity:")
-    freq_corr = calculate_predictability_index(freq_series, velocity_series, years, top25, bottom25)
+    freq_corr = calculate_predictability_index(freq_series, velocity_series, years, top, bottom)
 
     # plot trends
     plot_id_vs_freq(id_corr, freq_corr, years[:-1])
