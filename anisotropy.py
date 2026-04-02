@@ -232,9 +232,10 @@ def print_top_bottom_anisotropy(pkl_path, n=10):
 
 def analyze_by_period(pkl_path):
     """
-    Performs two categorical analyses:
+    Performs three categorical analyses:
     1. Group by Anisotropy -> Measure Alignment
-    2. Group by Alignment  -> Measure Drift Magnitude
+    2. Group by Anisotropy -> Measure Drift Magnitude (New!)
+    3. Group by Alignment  -> Measure Drift Magnitude
     """
     with open(pkl_path, 'rb') as f:
         data = pickle.load(f)
@@ -245,23 +246,20 @@ def analyze_by_period(pkl_path):
     vocab = data['common_vocab']
     years = data['years']
     
-    # Define a shared separator for the table
-    line_width = 85
+    line_width = 95
     print("=" * line_width)
-    print(f"{'Period':<15} | {'Metric Group':<20} | {'Avg Value':<15} | {'Sample Size'}")
+    print(f"{'Period':<15} | {'Metric Group':<25} | {'Avg Value':<15} | {'Sample Size'}")
     print("=" * line_width)
 
     for i in range(len(years) - 1):
         period_label = f"{years[i]} -> {years[i+1]}"
         
-        # Collect current lists for all words at index i
         scores_t = []   # Anisotropy
         aligns_t = []   # Alignment
         drifts_t = []   # Drift Magnitude
         
         for word in vocab:
-            # Check indices to avoid errors
-            if i < len(ani_series[word]) and i < len(align_series[word]):
+            if i < len(ani_series[word]) and i < len(align_series[word]) and i < len(drift_series.get(word, [])):
                 scores_t.append(ani_series[word][i])
                 aligns_t.append(align_series[word][i])
                 drifts_t.append(drift_series[word][i])
@@ -273,37 +271,45 @@ def analyze_by_period(pkl_path):
         # --- ANALYSIS 1: Group by Anisotropy, measure Alignment ---
         ani_high_thresh = np.percentile(scores_t, 90)
         ani_low_thresh = np.percentile(scores_t, 10)
-        
         mask_h_ani = scores_t >= ani_high_thresh
         mask_l_ani = scores_t <= ani_low_thresh
         
         avg_align_h_ani = np.mean(aligns_t[mask_h_ani])
         avg_align_l_ani = np.mean(aligns_t[mask_l_ani])
-        ani_gap = ((avg_align_h_ani - avg_align_l_ani) / avg_align_l_ani) * 100
+        align_gap_ani = ((avg_align_h_ani - avg_align_l_ani) / avg_align_l_ani) * 100
 
-        # --- ANALYSIS 2: Group by Alignment, measure Drift Magnitude ---
+        # --- ANALYSIS 2: Group by Anisotropy, measure Drift Magnitude (New!) ---
+        avg_drift_h_ani = np.mean(drifts_t[mask_h_ani])
+        avg_drift_l_ani = np.mean(drifts_t[mask_l_ani])
+        drift_gap_ani = ((avg_drift_h_ani - avg_drift_l_ani) / avg_drift_l_ani) * 100
+
+        # --- ANALYSIS 3: Group by Alignment, measure Drift Magnitude ---
         align_high_thresh = np.percentile(aligns_t, 90)
         align_low_thresh = np.percentile(aligns_t, 10)
-        
         mask_h_align = aligns_t >= align_high_thresh
         mask_l_align = aligns_t <= align_low_thresh
         
         avg_drift_h_align = np.mean(drifts_t[mask_h_align])
         avg_drift_l_align = np.mean(drifts_t[mask_l_align])
-        align_gap = ((avg_drift_h_align - avg_drift_l_align) / avg_drift_l_align) * 100
+        drift_gap_align = ((avg_drift_h_align - avg_drift_l_align) / avg_drift_l_align) * 100
 
         # --- PRINTING RESULTS ---
-        # Part 1: Anisotropy -> Alignment
-        print(f"{period_label:<15} | {'High Ani (Top 10%)':<20} | {avg_align_h_ani:<15.4f} | {sum(mask_h_ani)}")
-        print(f"{'':<15} | {'Low Ani (Bot 10%)':<20} | {avg_align_l_ani:<15.4f} | {sum(mask_l_ani)}")
-        print(f"{'':<15} | -> Align Gap: {ani_gap:>+6.2f}%")
-        
-        print(f"{'':<15} | {'-'*45}") # Sub-separator
+        # 1. Anisotropy -> Alignment
+        print(f"{period_label:<15} | {'High Ani (Top 10%)':<25} | {avg_align_h_ani:<15.4f} | {sum(mask_h_ani)}")
+        print(f"{'':<15} | {'Low Ani (Bot 10%)':<25} | {avg_align_l_ani:<15.4f} | {sum(mask_l_ani)}")
+        print(f"{'':<15} | -> Align Gap (from Ani): {align_gap_ani:>+6.2f}%")
+        print(f"{'':<15} | {'-'*55}")
 
-        # Part 2: Alignment -> Drift Magnitude
-        print(f"{'':<15} | {'High Align (10%)':<20} | {avg_drift_h_align:<15.4f} | {sum(mask_h_align)}")
-        print(f"{'':<15} | {'Low Align (10%)':<20} | {avg_drift_l_align:<15.4f} | {sum(mask_l_align)}")
-        print(f"{'':<15} | -> Drift Gap: {align_gap:>+6.2f}%")
+        # 2. Anisotropy -> Drift Magnitude (NEW!)
+        print(f"{'':<15} | {'High Ani -> Drift':<25} | {avg_drift_h_ani:<15.4f} | {sum(mask_h_ani)}")
+        print(f"{'':<15} | {'Low Ani -> Drift':<25} | {avg_drift_l_ani:<15.4f} | {sum(mask_l_ani)}")
+        print(f"{'':<15} | -> Drift Gap (from Ani): {drift_gap_ani:>+6.2f}%")
+        print(f"{'':<15} | {'-'*55}")
+
+        # 3. Alignment -> Drift Magnitude
+        print(f"{'':<15} | {'High Align -> Drift':<25} | {avg_drift_h_align:<15.4f} | {sum(mask_h_align)}")
+        print(f"{'':<15} | {'Low Align -> Drift':<25} | {avg_drift_l_align:<15.4f} | {sum(mask_l_align)}")
+        print(f"{'':<15} | -> Drift Gap (from Align): {drift_gap_align:>+6.2f}%")
         
         print("-" * line_width)
 
@@ -560,6 +566,61 @@ def calculate_alignment_drift_correlation(pkl_path):
 
     generate_alignment_drift_scatter_plots(pkl_path)
 
+def calculate_anisotropy_alignment_correlation(pkl_path):
+    """
+    Calculates the Spearman correlation between Anisotropy Score A(w) 
+    and Alignment with the first principal component (|cos|).
+    
+    This tests the hypothesis: Do words with higher geometric constraint (anisotropy) 
+    tend to drift more strictly along their local principal axis?
+    """
+    if not os.path.exists(pkl_path):
+        print(f"Error: {pkl_path} not found.")
+        return
+
+    with open(pkl_path, 'rb') as f:
+        data = pickle.load(f)
+    
+    ani_series = data['anisotropy_series']
+    align_series = data['alignment_series']
+    vocab = data['common_vocab']
+    years = data['years']
+    
+    header_width = 90
+    print("\n" + "=" * header_width)
+    print(f"{'CORRELATION ANALYSIS: ANISOTROPY A(w) vs. ALIGNMENT |cos|':^90}")
+    print("-" * header_width)
+    print(f"{'Period':<18} | {'Spearman Rho':<15} | {'P-Value':<15} | {'Interpretation'}")
+    print("=" * header_width)
+
+    for i in range(len(years) - 1):
+        period_label = f"{years[i]} -> {years[i+1]}"
+        
+        all_anis = []
+        all_aligns = []
+        
+        for word in vocab:
+            # We compare Anisotropy at time t with the Alignment of the drift t -> t+1
+            if i < len(ani_series[word]) and i < len(align_series[word]):
+                a_val = ani_series[word][i]
+                al_val = align_series[word][i]
+                
+                if not np.isnan(a_val) and not np.isnan(al_val):
+                    all_anis.append(a_val)
+                    all_aligns.append(al_val)
+        
+        if len(all_anis) < 10:
+            continue
+
+        # Calculate Spearman Rank Correlation
+        rho, p_val = spearmanr(all_anis, all_aligns)
+        
+        significance = "Significant" if p_val < 0.05 else "Not Sig."
+        direction = "Positive" if rho > 0 else "Negative"
+        
+        print(f"{period_label:<18} | {rho:<15.4f} | {p_val:<15.2e} | {direction} ({significance})")
+
+    print("=" * header_width)
 
 
 def generate_alignment_drift_scatter_plots(pkl_path):
@@ -697,6 +758,8 @@ if __name__ == "__main__":
     # print()
 
     calculate_alignment_drift_correlation(results_file)
+
+    calculate_anisotropy_alignment_correlation(results_file)
 
     # visualize_word_detailed_shift_arrow(
     #     pkl_path=results_file, 
